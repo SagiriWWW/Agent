@@ -1,0 +1,233 @@
+% !TeX program = xelatex
+\documentclass[UTF8,a4paper,zihao=-4]{ctexart}
+
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{amsmath}
+\usepackage{enumitem}
+\usepackage{xurl}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\geometry{left=2.6cm,right=2.6cm,top=2.8cm,bottom=2.8cm}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  urlcolor=blue,
+  citecolor=blue
+}
+\setlist[itemize]{leftmargin=2em,itemsep=0.2em,topsep=0.3em}
+\setlist[enumerate]{leftmargin=2em,itemsep=0.2em,topsep=0.3em}
+\renewcommand{\arraystretch}{1.18}
+\setlength{\tabcolsep}{3pt}
+
+\title{阶段性工作记录（二）：\\飞行遥测 Agent MVP 的批量验收与规则版本复核进展}
+\author{项目工作记录}
+\date{2026年7月2日}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+本文档总结截至 2026 年 7 月 2 日当前项目的阶段性进度。与第一阶段“建立 Agent 工具编排原型和基础概念框架”相比，当前项目已经从单次内置 Demo 的可运行性验证，推进到结构化规则库、字段语义配置、运行事件流、Web/CLI 多入口、批量验收和规则版本对比复核阶段。系统仍定位为“单 Agent 编排器 + 本地可信工具箱 + 证据链”的 MVP，而非完整生产级多智能体决策系统。当前最重要的工程进展是：基线规则库 \path|examples/rules.yaml| 与候选规则库 \path|examples/rules_v2.yaml| 均已在 \path|dataset/last_avg/| 下 30 个飞行遥测数据集上完成全量批量验证，两个批次均达到 30/30 通过；同时，项目生成了规则稳定性分析、v1/v2 规则版本对比报告、v2 专家复核包以及关键命中样例导出。需要强调的是，当前规则优化主要用于验证“规则可迭代复核闭环”，不应继续围绕 \path|dataset/last_avg/| 反复调参；下一阶段应转向跨客户数据集的 Schema 语义映射、规则适用性检查和数据适配报告。本文从系统架构、工具箱能力、规则库演进、批量验证结果、工程验证状态、研究边界与后续工作几个方面整理当前进度，为后续论文中“系统实现”“实验验证”和“泛化适配能力”章节提供材料。
+\end{abstract}
+
+\noindent\textbf{关键词：} 飞行遥测；Agent 工具编排；批量验收；规则版本对比；规则稳定性；证据链；可复核分析
+
+\section{当前阶段总体判断}
+
+截至 2026 年 7 月 2 日，项目已经形成一个可离线运行、可 Web 演示、可 CLI 批量验收、可输出中文报告与证据链的飞行遥测分析 MVP。当前系统的核心定位可以概括为：
+\begin{quote}
+以单 Agent 编排器为流程控制中心，以本地工具箱为可信执行层，以规则库和飞行遥测数据为输入，以报告、可视化、规则复核产物和证据链为输出的可复核数据分析原型。
+\end{quote}
+
+相较于第一阶段，当前进度的关键变化包括：
+\begin{itemize}
+  \item 规则库已由早期 Markdown 样例推进到结构化 YAML 规则库，并形成 v1 基线与 v2 候选版本。
+  \item Agent 离线流程由约 12 步扩展为包含规则校验、Schema 建议、Schema 复核与数据适配审查的 16 步确定性流程。
+  \item 系统新增批量验收能力，能够遍历 \path|dataset/last_avg/| 下多个数据集，为每个数据集生成独立 run，并生成批量汇总报告和批量数据适配审查。
+  \item 系统新增规则稳定性分析和规则版本对比能力，能够从跨数据集命中分布角度评价规则阈值是否过宽、局部高命中或相对稳定。
+  \item Web 侧新增标准演示、客户数据分析、批量验收、规则优化、分析能力中心、运行进度页、规则库校验页、Schema 复核页和数据适配审查页。
+  \item 每次运行不仅生成报告和可视化，还生成 \path|run_events.jsonl|、规则校验产物、Schema 建议产物、Schema 复核产物与数据适配产物。
+\end{itemize}
+
+因此，当前阶段已经不只是“证明单次分析闭环可运行”，而是开始回答更接近论文实验的问题：同一套 Agent 工具链和规则库在一组同口径飞行遥测数据上是否具有稳定的工程表现。同时，当前阶段也暴露出下一步的关键问题：客户后续数据未必沿用当前 \path|last_avg| 字段结构，因此系统不能停留在单一数据集族的阈值优化上，而必须补齐跨数据集字段识别、语义映射和规则适配能力。
+
+\section{系统架构与工具链进展}
+
+\subsection{Agent 编排层}
+
+当前 Agent 编排层仍由 \path|agent_mvp.agent.AgentRunner| 实现。其角色不是直接执行算法，而是控制运行模式、构建或接收工具计划、调度 \path|ToolExecutor|、记录 Agent 轨迹、触发结果校验并生成报告。系统支持两类运行模式：
+\begin{itemize}
+  \item \textbf{本地确定性模式：} 无需外部模型 API，按照固定工具计划执行，适合作为演示、验收和论文实验的稳定基线。
+  \item \textbf{OpenAI-compatible 工具调用模式：} 配置 API 后可由外部或兼容模型选择函数工具，但真实数据处理仍由本地工具执行。
+\end{itemize}
+
+当前默认实验和批量验收均以本地确定性模式为主。这一选择有利于消除模型随机性对工程验收的干扰，也符合当前阶段“先证明工具链稳定，再逐步引入更强推理能力”的路线。
+
+\subsection{本地工具箱扩展}
+
+当前工具箱已经覆盖从输入理解到报告生成的完整链条。与第一阶段相比，新增或明确强化的工具能力主要包括：
+\begin{itemize}
+  \item \texttt{validate\_rule\_library}：对规则字段、条件可执行性、严重程度、建议动作等进行规则库校验。
+  \item \texttt{suggest\_schema\_metadata}：结合稳定配置、字段名和规则绑定关系生成字段中文名、分组、角色和忽略建议。
+  \item \texttt{review\_schema\_metadata}：生成 Schema 人工复核清单，支持后续专家确认字段语义。
+  \item 批量验收相关能力：通过 \path|agent_mvp/batch.py| 复用普通 run 流程，生成批次级报告、规则稳定性分析和版本对比报告。
+\end{itemize}
+
+当前离线流程可概括为：
+\[
+\begin{aligned}
+&\text{数据画像} \rightarrow \text{规则解析} \rightarrow \text{规则校验} \rightarrow \text{Schema 建议} \rightarrow \text{Schema 复核} \\
+&\rightarrow \text{缺失值检查} \rightarrow \text{离群值提示} \rightarrow \text{规则命中} \rightarrow \text{FP-growth 后端检查} \\
+&\rightarrow \text{关联规则挖掘} \rightarrow \text{相关性分析} \rightarrow \text{结果摘要} \rightarrow \text{结果校验} \\
+&\rightarrow \text{可视化生成} \rightarrow \text{报告生成}.
+\end{aligned}
+\]
+
+\subsection{字段语义配置}
+
+项目新增稳定 Schema 配置 \path|configs/telemetry_schema.yaml|，并通过 \path|agent_mvp/schema_metadata.py| 形成字段语义建议能力。其研究意义在于将“原始遥测字段名”与“论文和报告中可读的中文语义”分离：
+\begin{itemize}
+  \item 底层计算继续使用原始字段名，避免影响规则执行、关联规则挖掘和证据链复核。
+  \item 报告和可视化优先展示中文字段名，提高专家审阅和论文表述的可读性。
+  \item 对时间字段、标签字段、诊断字段等可建议忽略，降低无监督关联挖掘中的噪声。
+\end{itemize}
+
+这一部分可在后续论文中作为“遥测字段语义映射与人工复核机制”描述。
+
+\section{规则库演进与批量验证}
+
+\subsection{结构化规则库}
+
+当前内置 Demo 默认使用 \path|examples/rules.yaml|，并新增候选版本 \path|examples/rules_v2.yaml|。结构化 YAML 规则相较早期 Markdown 规则具有更强的可执行性与可复核性。每条规则包含规则编号、名称、字段、比较符、阈值、严重程度、标签、解释、建议动作与置信度等信息。
+
+v2 规则库的主要变化是对高频命中或局部高命中的阈值进行收窄：
+\begin{itemize}
+  \item R001 主电池余量阈值由 \texttt{< 70} 收窄为 \texttt{< 50}。
+  \item R002 主电池电压阈值由 \texttt{< 22500} 收窄为 \texttt{< 21700}。
+  \item R007 地速低值阈值由 \texttt{< 0.5} 收窄为 \texttt{< 0.2}，使其更接近“接近静止”事件。
+\end{itemize}
+
+需要强调的是，v2 的改进依据是跨数据集命中分布的稳定性，而不是监督学习准确率。当前数据中 \texttt{label} 全部为 0，\texttt{diagnosis} 为空，因此不能将规则稳定性提升表述为故障诊断准确率提升。
+
+\subsection{批量验收结果}
+
+当前已经完成两个关键批次：
+\begin{longtable}{p{0.18\textwidth}p{0.28\textwidth}p{0.15\textwidth}p{0.14\textwidth}p{0.17\textwidth}}
+\toprule
+\textbf{批次} & \textbf{规则库} & \textbf{数据集数} & \textbf{通过情况} & \textbf{说明} \\
+\midrule
+\endhead
+v1 基线批次 & \path|examples/rules.yaml| & 30 & 30/30 通过 & 形成基线规则稳定性分析。 \\
+v2 候选批次 & \path|examples/rules_v2.yaml| & 30 & 30/30 通过 & 形成 v2 稳定性分析、v1/v2 对比报告和专家复核包。 \\
+\bottomrule
+\end{longtable}
+
+v1 基线批次 ID 为 \texttt{6e2fe14b-e1a6-4a28-b468-eb902b8b2512}；v2 候选批次 ID 为 \texttt{07b79fd7-b0dc-4534-8cb6-6fa17c8ce012}。两个批次均处理 \path|dataset/last_avg/| 下 30 个 CSV 数据集，状态均为 complete，失败数均为 0。
+
+\subsection{v2 规则稳定性结论}
+
+v2 批量规则稳定性分析显示，7 条规则中 6 条标记为“相对稳定”，1 条标记为“稀疏事件”。主要结果如下：
+\begin{longtable}{p{0.16\textwidth}p{0.25\textwidth}p{0.17\textwidth}p{0.16\textwidth}p{0.16\textwidth}}
+\toprule
+\textbf{规则} & \textbf{名称} & \textbf{质量标签} & \textbf{平均命中率} & \textbf{命中数据集} \\
+\midrule
+\endhead
+R001 & 主电池余量低风险 & 相对稳定 & 27.4\% & 16/30 \\
+R002 & 主电池电压低风险 & 相对稳定 & 28.0\% & 16/30 \\
+R003 & 主电池电流偏高 & 相对稳定 & 14.1\% & 30/30 \\
+R004 & Z 轴振动偏高 & 相对稳定 & 26.2\% & 30/30 \\
+R005 & 气压计温度偏高 & 相对稳定 & 24.0\% & 12/30 \\
+R006 & 垂直速度快速下降 & 相对稳定 & 9.7\% & 30/30 \\
+R007 & 地速接近静止 & 稀疏事件 & 0.5\% & 30/30 \\
+\bottomrule
+\end{longtable}
+
+其中 R005 虽然被标记为相对稳定，但最高命中率达到 100.0\%，且中位命中率为 0.0\%，说明该规则可能存在强数据集差异或场景差异，后续应结合环境温度、传感器状态或飞行阶段继续复核。R007 平均命中率较低但跨数据集出现，应更适合表述为事件型线索，而不是直接风险判定。
+
+\subsection{v1/v2 规则版本对比}
+
+v1/v2 对比报告显示，候选版本共有 3 条规则发生配置变化，整体结论分布为“改善 2、基本持平 5”。关键变化如下：
+\begin{itemize}
+  \item R001 从“疑似过宽”改善为“相对稳定”，平均命中率由 50.6\% 降至 27.4\%，命中数据集由 27/30 降至 16/30。
+  \item R002 从“局部高命中”改善为“相对稳定”，平均命中率由 47.3\% 降至 28.0\%，命中数据集由 25/30 降至 16/30。
+  \item R007 仍为“稀疏事件”，平均命中率由 1.2\% 降至 0.5\%，最高命中率由 15.4\% 降至 6.0\%。
+  \item R003、R004、R005、R006 未调整，表现基本持平。
+\end{itemize}
+
+因此，\path|examples/rules_v2.yaml| 可以作为下一阶段专家复核候选版本，但不应直接覆盖 v1 基线规则库。
+
+\section{Web、CLI 与运行产物进展}
+
+当前系统已经形成较完整的多入口交互层：
+\begin{itemize}
+  \item \texttt{/demo-ui}：标准演示场景。
+  \item \texttt{/runs/new}：客户数据分析页，支持选择本地稳定模式、外部模型优先或强制外部模型。
+  \item \texttt{/batch-ui}：批量验收页。
+  \item \texttt{/rule-versions}：规则库版本验证和 v1/v2 对比入口。
+  \item \texttt{/toolbox-ui}：分析能力中心。
+  \item \texttt{/runs/<run\_id>/progress}：Agent 运行进度页，通过 SSE 事件流展示步骤与工具状态。
+  \item \texttt{/runs/<run\_id>/rule-validation}、\texttt{/runs/<run\_id>/schema-review} 与 \texttt{/runs/<run\_id>/dataset-adaptation}：规则库、Schema 与数据适配复核页面。
+  \item \texttt{/batches/<batch\_id>/dataset-adaptation}：批量数据适配审查页面，用于查看多数据集下规则字段适配情况。
+\end{itemize}
+
+每次普通运行会生成 \path|manifest.json|、\path|run_events.jsonl|、\path|evidence_chain.json|、\path|artifacts/report.md|、\path|artifacts/report.html|、\path|artifacts/visualizations.html|、\path|artifacts/rule_validation.*|、\path|artifacts/schema_review.*| 与 \path|artifacts/dataset_adaptation.*| 等产物。每个批量任务会生成 \path|batch_manifest.json|、\path|batch_report.md|、\path|batch_report.html|、\path|batch_dataset_adaptation.*|、\path|batch_rule_analysis.md|、\path|batch_rule_analysis.html|、\path|key_hit_samples.md| 以及规则版本对比报告。其中 \path|key_hit_samples.md| 用于展示代表性命中行和关键上下文字段，帮助专家从真实样例判断规则阈值是否合理。
+
+\section{工程验证状态}
+
+本阶段执行了完整测试命令：
+\begin{quote}
+\texttt{.venv/bin/python -m pytest}
+\end{quote}
+
+测试结果为：共收集 20 个测试，20 个通过，0 个失败，存在 1 个来自 Starlette/FastAPI 测试客户端的弃用提醒。测试覆盖范围包括离线 Agent、Web 复核页、批量验收、批量数据适配审查、配置、Datamining FP-growth 后端、文件解析和工具输出。
+
+该结果说明当前代码层面的 MVP 回归测试处于通过状态。需要注意的是，测试通过只能证明当前工程流程和关键接口稳定，并不等同于业务规则已经完成专家定稿。
+
+\section{论文写作价值}
+
+当前阶段对论文写作的价值主要体现在三个方面：
+\begin{enumerate}
+  \item \textbf{系统实现章节：} 可以描述单 Agent 编排、本地工具箱、运行上下文、事件流、报告生成和证据链记录的整体架构。
+  \item \textbf{方法章节：} 可以描述规则库结构化、规则校验、字段语义映射、FP-growth 关联规则挖掘、Pearson 相关性分析和规则稳定性评价方法。
+  \item \textbf{实验验证章节：} 可以使用 v1/v2 两个规则库在 30 个 \texttt{last\_avg} 数据集上的批量验收结果，展示规则阈值优化前后的命中分布变化。
+\end{enumerate}
+
+在论文表述中，建议将当前结果称为“工程稳定性验证”或“规则命中分布复核”，而不是“故障诊断准确率验证”。
+
+\section{当前边界与未完成能力}
+
+当前项目仍需明确以下边界：
+\begin{itemize}
+  \item 当前是单 AgentRunner 编排器，不是真正的多智能体运行时。
+  \item 当前没有本地 8B LLM 推理栈，也没有本地模型吞吐率基准。
+  \item 当前没有向量数据库、Embedding 流程或完整 RAG 案例检索能力。
+  \item 当前没有因果图推理；FP-growth 与 Pearson 相关性只说明共现或线性相关，不说明因果。
+  \item 当前离群值检测仍是数据质量提示，不是完整异常检测模块。
+  \item 当前输入仍以 CSV/XLSX 文件为主，没有接入实时遥测流。
+  \item 当前规则 v2 是专家复核候选版本，不是最终业务规则定稿。
+  \item 当前批量验证集中在 \path|dataset/last_avg/|，其结果不能直接外推到字段结构、单位体系或业务阶段明显不同的客户数据。
+  \item 继续围绕当前数据集微调规则阈值存在过拟合风险，后续应优先验证数据适配能力。
+\end{itemize}
+
+\section{下一阶段建议}
+
+下一阶段最优先的工作不是继续围绕当前 \path|last_avg| 数据调阈值，而是提升对新客户数据的泛化适配能力。当前规则复核和关键命中样例导出已经证明闭环可运行，后续应把重点转向 Schema 语义层和规则适用性判断。建议按以下顺序推进：
+\begin{enumerate}
+  \item 增强跨数据集 Schema 语义映射能力，识别新数据的字段类型、单位、别名、时间列、标签列、状态列和业务阶段线索。
+  \item 增强规则适用性检查，在执行规则前判断客户数据是否具备必要字段、单位是否一致、字段映射是否需要人工确认。
+  \item 固化数据适配报告，对未知数据先说明可直接执行、需映射确认、不可执行的规则和字段，不强行套用当前 \texttt{last\_avg} 规则。
+  \item 将规则版本复核流程固化为论文实验流程，包括输入、批次、指标、结论边界、关键命中样例和证据链路径。
+  \item 增加更贴近领域的分析工具，例如 FFT 振动分析或分段异常检测，但仍应以本地工具形式接入。
+  \item 在现有 RunContext 与 EvidenceStore 稳定后，再考虑将规划、数据、工具、推理与验证拆分为逻辑 Agent 模块。
+\end{enumerate}
+
+\section{本阶段小结}
+
+当前项目已经从“单次可运行 MVP”推进到“可批量验收与规则版本复核的 Agent 工具箱 MVP”。核心进展包括：结构化 YAML 规则库、字段语义配置、规则库校验、Schema 复核、数据适配审查、Web 多入口、运行事件流、批量验收、规则稳定性分析、v1/v2 对比报告、v2 专家复核包和关键命中样例导出。v1 与 v2 规则库均已在 30 个 \texttt{last\_avg} 数据集上完成全量批量验证，且测试套件 20 项全部通过。下一阶段应停止把主要精力放在当前样例数据的规则阈值微调上，转而围绕跨数据集 Schema 语义映射、规则适用性检查、数据适配报告和后续客户数据泛化能力继续推进。
+
+\end{document}

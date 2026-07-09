@@ -1,0 +1,5 @@
+battery_pct,battery_voltage_mv,battery_current_amp,vib_z,baro_temp,vertical_speed,ground_speed,mission_phase,label
+45,21650,1400,13,3830,-25,0.10,landing,0
+80,23000,800,5,3600,-5,5.20,cruise,0
+52,21800,1200,10,3700,-18,0.50,climb,0
+38,21400,1550,14,3860,-30,0.05,landing,0

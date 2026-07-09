@@ -1,0 +1,86 @@
+schema_version: rule_library_v2
+dataset_kind: last_avg
+language: zh-CN
+base_rule_library: examples/rules.yaml
+description: 基于批量规则稳定性分析形成的第二版结构化遥测规则库。v2 优先收窄高频命中规则，并保留稀疏事件规则的业务解释。
+change_summary:
+  - R001 在 v1 中跨数据集命中比例偏高，v2 将主电池余量阈值从 70 收窄到 50。
+  - R002 在 v1 中存在局部高命中，v2 将主电池电压阈值从 22500 收窄到 21700。
+  - R007 在 v1 中属于稀疏事件，v2 将地速阈值从 0.5 收窄到 0.2，使其更接近“接近静止”场景。
+rules:
+  - rule_id: R001
+    name: 主电池余量低风险
+    field: 1_battery_remaining_avg
+    operator: <
+    value: 50
+    severity: high
+    tags: [power, battery, threshold, v2_refined]
+    rationale: v1 阈值 70 在多数数据集中高比例命中，容易把正常任务消耗阶段也纳入告警；v2 聚焦更低余量区间。
+    recommendation: 优先复核余量低于 50 的飞行窗口，并结合任务阶段、返航策略和电池健康状态判断风险。
+    confidence: 0.86
+
+  - rule_id: R002
+    name: 主电池电压低风险
+    field: 1_voltage_battery_avg
+    operator: <
+    value: 21700
+    severity: high
+    tags: [power, voltage, threshold, v2_refined]
+    rationale: v1 阈值 22500 存在局部高命中，v2 收窄阈值以突出更明显的低电压窗口。
+    recommendation: 对低于 21700 的窗口检查同一时段电流、负载变化和电池余量，确认是否存在供电风险。
+    confidence: 0.86
+
+  - rule_id: R003
+    name: 主电池电流偏高
+    field: 1_current_battery_avg
+    operator: ">"
+    value: 1300
+    severity: medium
+    tags: [power, current, load]
+    rationale: 电流偏高通常表示载荷增大或动力系统处于高负荷状态。
+    recommendation: 结合速度、姿态和任务阶段检查是否存在持续高负载。
+    confidence: 0.86
+
+  - rule_id: R004
+    name: Z 轴振动偏高
+    field: 241_vibration_z_avg
+    operator: ">"
+    value: 12
+    severity: medium
+    tags: [vibration, sensor, structure]
+    rationale: Z 轴振动偏高可能与结构振动、安装松动或飞行姿态变化有关。
+    recommendation: 复核振动三轴趋势，并与姿态角、速度和任务阶段交叉检查。
+    confidence: 0.84
+
+  - rule_id: R005
+    name: 气压计温度偏高
+    field: 29_temperature_avg
+    operator: ">"
+    value: 3820
+    severity: medium
+    tags: [barometer, temperature, environment]
+    rationale: 气压计温度偏高可能影响气压高度估计稳定性，也可能反映局部环境变化。
+    recommendation: 同时查看绝对气压、气压差和高度相关字段，判断是否为传感器或环境因素。
+    confidence: 0.86
+
+  - rule_id: R006
+    name: 垂直速度快速下降
+    field: 33_vz_avg
+    operator: <
+    value: -20
+    severity: high
+    tags: [navigation, vertical_speed, flight_state]
+    rationale: 垂直速度快速下降是飞行状态变化的重要信号，需要结合高度变化判断风险。
+    recommendation: 复核相对高度、GPS 高度、姿态角和任务阶段，确认是否为正常下降或异常状态。
+    confidence: 0.9
+
+  - rule_id: R007
+    name: 地速接近静止
+    field: 168_speed_avg
+    operator: <
+    value: 0.2
+    severity: low
+    tags: [navigation, speed, flight_state, sparse_event, v2_refined]
+    rationale: v1 阈值 0.5 属于跨数据集稀疏事件，v2 收窄到 0.2 以减少正常低速飞行窗口的干扰。
+    recommendation: 将低速窗口与高度、姿态和时间窗口共同查看，优先判断是否为起降、悬停或停滞状态。
+    confidence: 0.8

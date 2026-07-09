@@ -1,0 +1,259 @@
+% !TeX program = xelatex
+\documentclass[UTF8,a4paper,zihao=-4]{ctexart}
+
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{amsmath}
+\usepackage{enumitem}
+\usepackage{xurl}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\geometry{left=2.6cm,right=2.6cm,top=2.8cm,bottom=2.8cm}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  urlcolor=blue,
+  citecolor=blue
+}
+\setlist[itemize]{leftmargin=2em,itemsep=0.2em,topsep=0.3em}
+\setlist[enumerate]{leftmargin=2em,itemsep=0.2em,topsep=0.3em}
+\renewcommand{\arraystretch}{1.18}
+\setlength{\tabcolsep}{3pt}
+
+\title{阶段性工作记录（三）：\\飞行遥测 Agent MVP 的跨客户 Schema 适配与泛化门禁进展}
+\author{项目工作记录}
+\date{2026年7月7日}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+本文档总结截至 2026 年 7 月 7 日当前项目的阶段性进度。继前一阶段完成 \path|last_avg| 数据集上的批量验收、规则版本对比与 v2 专家复核包之后，当前工作重心已经从“继续围绕既有样例数据调阈值”转向“面向未知客户数据结构的 Schema 语义映射、规则适配审查、映射回归验证与泛化门禁”。系统仍保持“单 Agent 编排器 + 本地可信工具箱 + 证据链 + Web/CLI 演示”的 MVP 定位，但工具链新增了 Schema 映射、数据适配、映射执行计划、映射回归和泛化门禁等能力。当前新增客户结构变体数据集用于验证字段别名、统计口径变化与缺字段场景；批量运行结果表明，面对客户变体数据时系统能够稳定进入“需映射确认/需复核”状态，而不是强行执行规则并生成诊断结论。该阶段的主要研究意义在于形成一种反过拟合的工程门禁：候选字段映射不得被直接当作已确认映射，规则命中不得脱离数据适配证据解释，复核意见也必须跨运行、跨数据指纹沉淀后才可进入全局配置候选。
+\end{abstract}
+
+\noindent\textbf{关键词：} 飞行遥测；Schema 语义映射；数据适配；映射回归；泛化门禁；人工复核；反过拟合
+
+\section{当前阶段总体判断}
+
+截至 2026 年 7 月 7 日，项目已经从第二阶段的“批量规则版本复核”推进到“跨客户数据泛化适配预备层”。当前系统不再只证明 \path|dataset/last_avg/| 上的规则命中稳定性，而是开始处理一个更接近真实部署的问题：当客户上传的数据字段名、统计口径、单位或必需字段与当前样例不同，系统应如何保守地判断规则是否可用。
+
+当前阶段的核心结论如下：
+\begin{itemize}
+  \item \path|last_avg| 规则批量验收和 v1/v2 对比结果仍作为当前规则工程稳定性的基线。
+  \item 新增客户变体数据集 \path|dataset/customer_variants/|，用于验证字段别名、\path|last| 后缀统计口径和缺少关键字段时的适配行为。
+  \item 新增 Schema 语义角色配置 \path|configs/schema_semantics.yaml| 和映射覆盖草案 \path|configs/schema_mapping_overrides.yaml|。
+  \item 新增运行内人工复核决策 \path|review_decisions.json|，并通过复核沉淀报告将多次人工意见聚合为全局配置候选。
+  \item 新增映射执行计划、映射回归验证和泛化验收门禁，确保候选映射不会被直接用于自动诊断。
+  \item 最新测试结果为 31 项全部通过，说明当前新增工具链和页面路由具备基本回归稳定性。
+\end{itemize}
+
+因此，当前系统的研究对象可以进一步表述为：面向飞行遥测规则分析任务，构建一种将规则执行前置于 Schema 语义映射和数据适配审查之后的可追溯 Agent 工具编排机制。
+
+\section{新增能力概述}
+
+\subsection{Schema 语义映射}
+
+项目新增 \path|configs/schema_semantics.yaml|，用于描述跨客户数据可复用的字段语义角色，例如主电池剩余电量、主电池电压、主电池电流、Z 轴振动、气压计温度、垂直速度和地速等。该文件不把当前 \path|last_avg| 字段名视为唯一结构，而是通过语义角色、中文名、分组、单位、来源编号、关键词和别名建立字段映射基础。
+
+新增工具 \texttt{review\_schema\_mapping} 的作用是将当前数据集字段与稳定语义角色进行匹配，输出字段语义候选、规则字段候选映射、置信度、单位与统计口径信息。其定位是“提出可审查候选”，而不是自动改写规则。
+
+\subsection{数据适配审查}
+
+新增工具 \texttt{review\_dataset\_adaptation} 在规则执行前判断规则字段与当前数据字段之间的关系。它区分以下几类状态：
+\begin{itemize}
+  \item 字段精确匹配，可以直接执行；
+  \item 已确认映射，需要后续执行计划和回归验证；
+  \item 后缀口径不一致，例如规则期望 \path|_avg| 而数据只有 \path|_last|；
+  \item 语义候选映射，需要人工确认；
+  \item 缺失字段或不适用规则。
+\end{itemize}
+
+该工具的意义在于将“规则是否能套用到当前数据”从规则命中分析中分离出来。面对未知客户数据时，系统优先报告适配状态，而不是直接输出命中率。
+
+\subsection{映射执行计划与回归验证}
+
+新增工具 \texttt{build\_mapping\_execution\_plan} 会把已确认映射转化为可审查的字段重写预案。该预案只说明“如果使用该映射，规则条件会如何被重写”，不自动修改规则阈值，也不自动生成诊断结论。
+
+新增工具 \texttt{validate\_mapping\_regression} 用于检查映射重写预案是否能够透明执行，并将需确认、需复核、失败或缺少证据的规则显式暴露。该验证证明的是技术可执行性，不证明阈值业务正确性。
+
+\subsection{泛化验收门禁}
+
+新增工具 \texttt{review\_generalization\_readiness} 是本阶段最重要的反过拟合门禁。它综合 Schema 映射、数据适配、映射执行计划、规则执行和分析校验状态，判断当前 run 是否允许自动诊断解释。只要存在候选映射未确认、已确认映射未完成执行计划或回归验证、不适用规则、不可解析规则等问题，门禁就不会允许自动诊断。
+
+这一机制在论文中可以表述为“规则执行前的泛化审查层”或“面向未知数据结构的保守解释门禁”。
+
+\section{运行流程变化}
+
+当前离线确定性流程已扩展为 19 步。与第二阶段相比，新增的核心步骤集中在规则执行之前和规则执行之后：
+\begin{enumerate}
+  \item 数据画像；
+  \item 规则解析；
+  \item 规则库校验；
+  \item Schema 元数据建议；
+  \item Schema 元数据复核；
+  \item Schema 语义映射；
+  \item 数据适配审查；
+  \item 映射执行计划；
+  \item 映射回归验证；
+  \item 缺失值检查；
+  \item 离群值提示；
+  \item 规则命中；
+  \item 泛化验收门禁；
+  \item FP-growth 后端检查；
+  \item 关联规则挖掘；
+  \item 相关性分析；
+  \item 结果摘要；
+  \item 结果校验；
+  \item 报告生成。
+\end{enumerate}
+
+这种流程变化说明，系统已经从“先执行规则再解释结果”转向“先判断规则是否适配，再决定是否允许解释结果”。这对于避免把样例规则机械套用到客户数据具有重要意义。
+
+\section{批量运行与产物状态}
+
+\subsection{规则稳定性基线仍然保留}
+
+截至当前，\path|examples/rules.yaml| 和 \path|examples/rules_v2.yaml| 在 \path|dataset/last_avg/| 上的全量批量验收结果仍然保留：
+\begin{longtable}{p{0.18\textwidth}p{0.28\textwidth}p{0.16\textwidth}p{0.15\textwidth}p{0.16\textwidth}}
+\toprule
+\textbf{批次} & \textbf{规则库} & \textbf{数据集族} & \textbf{通过情况} & \textbf{用途} \\
+\midrule
+\endhead
+v1 基线批次 & \path|examples/rules.yaml| & \path|last_avg| & 30/30 通过 & 规则稳定性基线。 \\
+v2 候选批次 & \path|examples/rules_v2.yaml| & \path|last_avg| & 30/30 通过 & 规则优化候选与专家复核基础。 \\
+\bottomrule
+\end{longtable}
+
+v2 批次还生成了关键命中样例导出 \path|key_hit_samples.md|，覆盖 R001、R002、R005 和 R007 四类重点复核规则，共 4 条规则、20 个数据集样例组、100 条行样例。该产物用于辅助专家判断阈值和业务解释是否合理，仍不代表监督诊断准确率。
+
+\subsection{客户变体数据集批次}
+
+项目新增 \path|dataset/customer_variants/|，包含三类客户结构变体：
+\begin{itemize}
+  \item \path|01_alias_semantic_customer.csv|：使用 \path|battery_pct|、\path|battery_voltage_mv|、\path|vib_z|、\path|baro_temp|、\path|vertical_speed|、\path|ground_speed| 等别名字段；
+  \item \path|02_suffix_last_customer.csv|：使用 \path|_last| 后缀字段，模拟统计口径由均值变为末值；
+  \item \path|03_missing_required_fields_customer.csv|：仅保留部分关键字段，模拟必需字段缺失。
+\end{itemize}
+
+最新客户变体批次中，\path|examples/rules_v2.yaml| 在 2 个客户变体数据集上完成运行，批次状态为 complete，但通过数为 0、需复核数为 2、失败数为 0。该结果不是系统失败，而是正确暴露泛化风险。
+
+\begin{longtable}{p{0.32\textwidth}p{0.15\textwidth}p{0.16\textwidth}p{0.16\textwidth}p{0.13\textwidth}}
+\toprule
+\textbf{数据集} & \textbf{直接执行} & \textbf{需映射} & \textbf{不适用} & \textbf{结论} \\
+\midrule
+\endhead
+\path|01_alias_semantic_customer.csv| & 0/7 & 7 & 0 & 需复核 \\
+\path|02_suffix_last_customer.csv| & 0/7 & 7 & 0 & 需复核 \\
+\bottomrule
+\end{longtable}
+
+批量数据适配审查显示，7 条规则均进入“需映射确认”。例如 R001 在别名数据中映射为 \path|1_battery_remaining_avg -> battery_pct|，在后缀变体中映射为 \path|1_battery_remaining_avg -> 1_battery_remaining_last|。系统只将其作为语义候选或后缀口径不一致候选，不允许直接执行。
+
+\subsection{映射回归与泛化门禁结果}
+
+客户变体批次的映射回归汇总显示，2 个数据集均为“需复核”，7 条规则均为“需映射确认”。由于候选映射尚未人工确认，映射重写通过数为 0，映射回归通过数为 0。
+
+批量泛化门禁结果如下：
+\begin{itemize}
+  \item 门禁证据覆盖：2/2；
+  \item 批量门禁状态：批量需复核；
+  \item 允许自动诊断：0/2；
+  \item 平均语义覆盖：82.6\%；
+  \item 未解决规则合计：14；
+  \item 不可解析规则合计：14；
+  \item 需映射确认规则合计：14；
+  \item 已执行规则合计：0。
+\end{itemize}
+
+该结果说明系统能够识别字段语义候选，但不会将候选映射、后缀近似或当前数据特征直接转化为自动诊断结论。
+
+\section{人工复核与配置沉淀}
+
+\subsection{运行内复核决策}
+
+新增模块 \path|agent_mvp/review_decisions.py| 支持将人工确认或驳回的规则字段映射保存到单次 run 目录下的 \path|review_decisions.json|。这类决策可以刷新本次运行的 Schema 映射、数据适配、映射执行计划、泛化门禁和报告，但不会自动写入全局配置。
+
+这种设计避免了一个常见风险：为了让单个客户样本通过，直接把一次性字段映射写入全局别名表，从而造成后续数据过拟合。
+
+\subsection{跨运行复核沉淀}
+
+新增模块 \path|agent_mvp/review_promotions.py| 用于扫描多个 run 的复核意见，并生成复核沉淀候选报告。默认推广条件包括：
+\begin{itemize}
+  \item 至少 2 次确认；
+  \item 至少覆盖 2 个不同数据指纹；
+  \item 不存在驳回冲突。
+\end{itemize}
+
+当前复核沉淀报告已生成于 \path|runtime/review_promotions/review_decision_promotions.md|。该报告扫描 100 个运行目录，当前含复核意见运行数为 0，可推广候选为 0。这个结果说明全局配置尚未被人工复核意见污染，系统保持保守状态。报告同时生成 YAML 预览，但不会自动写入 \path|schema_mapping_overrides.yaml|。
+
+\section{Web 与 CLI 入口进展}
+
+当前 Web 入口新增和强化了以下页面：
+\begin{itemize}
+  \item \texttt{/review-promotions}：复核意见沉淀页；
+  \item \texttt{/runs/<run\_id>/schema-mapping}：Schema 语义映射页，支持确认或驳回候选映射；
+  \item \texttt{/runs/<run\_id>/dataset-adaptation}：数据适配审查页；
+  \item \texttt{/runs/<run\_id>/mapping-execution-plan}：映射执行计划页；
+  \item \texttt{/runs/<run\_id>/mapping-regression}：映射回归验证页；
+  \item \texttt{/runs/<run\_id>/generalization-readiness}：泛化门禁页；
+  \item \path|/batches/<batch_id>/mapping-regression| 与 \path|/batches/<batch_id>/generalization-readiness|：批量映射回归与泛化门禁汇总页。
+\end{itemize}
+
+CLI 侧支持通过 \texttt{--batch-dir} 指定 \path|last_avg|、\path|customer_variants| 或本地目录路径，使批量验收不再限定于 \path|last_avg| 数据集。这使后续论文实验可以设计“标准数据集稳定性验证”和“客户变体泛化门禁验证”两类实验。
+
+\section{工程验证状态}
+
+本阶段执行测试命令：
+\begin{quote}
+\texttt{.venv/bin/python -m pytest}
+\end{quote}
+
+测试结果为：共收集 31 个测试，31 个通过，0 个失败，存在 1 个来自 FastAPI 与 Starlette 测试客户端的弃用提醒。测试覆盖离线 Agent、Web 复核页、批量验收、批量泛化门禁、映射回归、复核意见沉淀、配置、Datamining FP-growth 后端、文件解析和工具输出等模块。
+
+相比第二阶段的 19 个测试，当前测试数量增加到 31 个，说明新增泛化适配层已经进入回归验证范围。
+
+\section{论文写作价值}
+
+当前阶段可为论文补充一个更有说服力的章节：从规则库在同构数据集上的稳定性验证，过渡到异构客户数据上的适配门禁验证。建议在论文中将其组织为以下逻辑：
+\begin{enumerate}
+  \item 同构数据集验证：使用 \path|last_avg| 的 30 个数据集验证规则库 v1/v2 的工程稳定性。
+  \item 规则复核样例：使用关键命中样例导出支持专家判断阈值含义。
+  \item 异构数据适配：使用客户变体数据集验证 Schema 语义映射和规则适配审查。
+  \item 泛化门禁：证明系统在字段不完全匹配或统计口径不一致时不会强行输出自动诊断。
+  \item 人工复核沉淀：说明只有跨运行、跨数据指纹稳定的复核意见才进入全局配置候选。
+\end{enumerate}
+
+该叙事比单纯报告规则命中率更适合支撑“可信、可复核、可泛化”的系统设计论证。
+
+\section{当前边界}
+
+当前项目仍需保持以下表述边界：
+\begin{itemize}
+  \item 当前仍是单 AgentRunner 编排器，不是真正的多智能体运行时。
+  \item 当前没有本地 8B LLM 推理栈，没有向量数据库，也没有完整 RAG。
+  \item 当前没有因果图推理；FP-growth 和 Pearson 相关性只说明共现或相关，不说明因果。
+  \item 当前客户变体数据集是小样本泛化验证，不代表真实客户全量数据分布。
+  \item 当前候选映射只说明字段语义可能相近，不说明单位换算、统计窗口和阈值业务含义已完全等价。
+  \item 当前 v2 规则仍是专家复核候选，不是最终业务规则定稿。
+\end{itemize}
+
+\section{下一阶段建议}
+
+下一阶段建议优先推进：
+\begin{enumerate}
+  \item 组织专家复核客户变体中的候选映射，形成首批有证据的 \path|review_decisions.json|。
+  \item 在多个不同客户变体或真实样例上重复确认映射，再通过复核沉淀报告生成全局配置候选。
+  \item 对确认后的映射执行映射回归验证，检查规则条件重写是否透明可执行。
+  \item 在 Schema 语义配置中补充单位换算、统计口径、适用飞行阶段和更多客户别名。
+  \item 在规则 v3 之前，先稳定 Schema 映射与泛化门禁，再决定是否调整规则阈值。
+\end{enumerate}
+
+\section{本阶段小结}
+
+当前项目已经从“规则版本稳定性验证”进一步推进到“跨客户数据 Schema 适配与泛化门禁”阶段。最重要的进展不是让所有客户变体规则都通过，而是让系统能够在字段别名、统计口径变化和缺字段场景下保守地暴露风险，并阻止候选映射被当作自动诊断依据。结合 31 项测试全部通过、关键命中样例导出、客户变体批次、映射回归汇总、泛化门禁汇总和复核沉淀报告，当前 MVP 已经具备较完整的“可运行、可复核、可扩展但不越界”的论文原型基础。
+
+\end{document}

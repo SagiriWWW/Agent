@@ -1,0 +1,253 @@
+% !TeX program = xelatex
+\documentclass[UTF8,a4paper,zihao=-4]{ctexart}
+
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{amsmath}
+\usepackage{enumitem}
+\usepackage{xurl}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\geometry{left=2.6cm,right=2.6cm,top=2.8cm,bottom=2.8cm}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  urlcolor=blue,
+  citecolor=blue
+}
+\setlist[itemize]{leftmargin=2em,itemsep=0.2em,topsep=0.3em}
+\setlist[enumerate]{leftmargin=2em,itemsep=0.2em,topsep=0.3em}
+
+\title{阶段性工作记录（一）：\\面向飞行遥测数据的规则驱动 Agent 工具编排原型}
+\author{项目工作记录}
+\date{2026年6月24日}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+本文档为当前项目的首次阶段性工作记录，旨在为后续论文写作积累可复用的学术化材料。根据现有项目文件、MVP 验收说明、运行报告与核心代码结构，当前研究主题可初步界定为：面向飞行遥测数据分析场景，构建一种以 Agent 为编排中枢、以本地工具箱为可信执行单元、以规则库和数据集为双输入、以证据链为可追溯机制的数据处理与规则挖掘原型系统。本文首先梳理该主题涉及的基础概念，包括智能 Agent、工具调用、本地可信执行、遥测数据画像、规则库结构化、关联规则挖掘、FP-growth 算法、相关性分析与证据链机制；随后记录当前阶段已形成的系统能力、数据范围、工程边界与后续研究问题。该文档不作为最终论文结论，而作为后续撰写绪论、相关工作、系统设计与实验验证章节的基础材料。
+\end{abstract}
+
+\noindent\textbf{关键词：} 智能 Agent；飞行遥测数据；规则库；FP-growth；关联规则挖掘；证据链；可解释数据分析
+
+\section{研究主题的初步界定}
+
+当前项目围绕“Agent 编排器 + 本地工具箱”的工程路线展开。与传统单体式数据分析脚本不同，本项目将系统划分为两个具有明确边界的部分：其一是负责任务计划、工具路由、结果校验和报告组织的 Agent 编排层；其二是负责数据读取、数据画像、规则解析、规则命中、关联规则挖掘、相关性分析与报告落盘的本地工具层。该设计的核心思想是让大语言模型或确定性 Agent 负责“何时调用何种工具”，而不直接承担原始数据计算和业务规则执行，从而降低模型幻觉、数据泄漏与不可复核推理的风险。
+
+从论文角度看，当前主题可以表述为：
+\begin{quote}
+面向飞行遥测数据的规则库与数据集驱动分析任务，研究一种由 Agent 负责流程编排、本地工具负责可信执行、证据链负责过程追溯的规则挖掘与报告生成方法。
+\end{quote}
+
+在该主题中，“规则库”用于承载专家知识与阈值条件，“数据集”用于提供飞行过程中的多源遥测变量，“Agent”用于组织分析流程，“FP-growth 关联规则挖掘”用于发现字段状态之间的统计共现关系，“证据链”用于记录输入、工具调用、输出与报告之间的可追溯关联。该方向具有较强的工程应用属性，也具有可解释人工智能、知识驱动数据挖掘与可信自动化分析等学术关联。
+
+\section{基础知识梳理}
+
+\subsection{智能 Agent 与工具编排}
+
+智能 Agent 通常指能够感知环境、形成任务目标、选择行动并反馈结果的计算实体。在大语言模型应用场景中，Agent 的能力不应仅理解为自然语言生成，而应理解为“规划、调用工具、观察结果、修正计划、生成输出”的闭环过程。对于数据分析任务而言，Agent 本身并不适合直接处理完整原始数据；更合理的方式是由 Agent 调用专门工具，由工具完成确定性计算，再将结构化摘要返回给 Agent。
+
+本项目中的 Agent 编排方式具有如下特征：
+\begin{itemize}
+  \item \textbf{计划性：} Agent 首先形成从数据画像到报告生成的执行计划。
+  \item \textbf{工具化：} 数据处理、规则解析、关联挖掘等操作均封装为工具函数。
+  \item \textbf{可观察性：} 每一步工具调用产生观察结果，形成可供用户审阅的执行轨迹。
+  \item \textbf{可回退性：} 在未配置模型 API 时，系统仍可通过本地确定性流程完成演示闭环。
+  \item \textbf{可追溯性：} 输入文件、工具参数、工具输出和报告生成均进入证据链。
+\end{itemize}
+
+这种方式适合用于论文中的系统架构章节，因为它将大模型的不确定推理与本地工具的确定性计算进行了分工。
+
+\subsection{飞行遥测数据与数据画像}
+
+飞行遥测数据通常由多个传感器或飞控模块在飞行过程中连续采集，常见字段包括电池余量、电池电压、电流、姿态角、速度、气压、高度、温度、振动等。此类数据具有高维、多变量、时间相关和设备语义强等特点。当前项目内置数据位于 \texttt{dataset/last\_avg/} 与 \texttt{dataset/last\_last/} 两类目录中，其中当前 MVP 选择 \texttt{last\_avg} 均值特征作为主要分析对象。相较于窗口末值，均值特征更适合阈值规则检查与关联模式探索，因为其对瞬时噪声的敏感性相对较低。
+
+数据画像是遥测数据分析的起点，主要包括：
+\begin{itemize}
+  \item 数据规模，即行数、列数与文件大小；
+  \item 字段结构，即字段名称、数据类型与语义类别；
+  \item 缺失情况，即缺失字段、缺失行数与缺失率；
+  \item 统计分布，即均值、标准差、分位数与取值范围；
+  \item 样例记录，即用于人工快速理解数据结构的安全样例行。
+\end{itemize}
+
+在本项目中，数据画像由 \texttt{profile\_dataset} 工具完成，其结果不仅服务于后续分析，也为报告和证据链提供基础上下文。
+
+\subsection{规则库与 RuleCard 表示}
+
+规则库是专家知识工程化表达的一种形式，通常将领域经验转化为可执行的条件表达式。例如，电池电压低于某阈值、垂直速度低于某阈值、振动超过某阈值等，都可以被表达为规则条件。规则库的优势在于解释性强、可人工审阅、便于和领域专家沟通；局限在于规则覆盖范围有限，且复杂自然语言规则往往需要进一步结构化。
+
+当前项目使用 \texttt{RuleCard} 作为规则库解析后的统一中间表示。一个规则卡片通常包含规则编号、规则名称、原始描述、目标字段、条件表达式、阈值信息、来源位置和解析置信度。该结构的意义在于：即使某些规则暂时无法自动执行，也可以保留原文与来源，避免规则在自动化处理中丢失。
+
+从论文写作角度，规则库可以被视为“显性知识”，数据集可以被视为“观测事实”，Agent 工具编排则是在二者之间建立可计算、可复核的分析流程。
+
+\subsection{数据质量检查与离群值提示}
+
+数据质量直接影响规则命中与关联挖掘结果。当前项目主要关注缺失值检查与基础离群值提示。缺失值检查用于识别字段是否存在不可用记录；离群值提示则采用 IQR 或 z-score 等透明统计方法，为专家提供可能异常的字段和样例索引。
+
+需要强调的是，当前离群值提示不等同于故障诊断，也不等同于完整异常检测模型。它的定位是“数据质量与分析提示”，即提示哪些字段可能存在极端取值或分布异常，供规则命中和后续人工复核参考。这种保守表述对于论文写作尤其重要，因为它避免将简单统计边界误写为业务故障结论。
+
+\subsection{关联规则挖掘与 FP-growth 算法}
+
+关联规则挖掘用于发现事务数据中变量状态之间的共现关系。经典形式为：
+\[
+X \Rightarrow Y,
+\]
+其中 $X$ 为前件，$Y$ 为后件。常用评价指标包括支持度、置信度与提升度：
+\[
+\operatorname{support}(X \Rightarrow Y)=\frac{\#(X \cup Y)}{N},
+\]
+\[
+\operatorname{confidence}(X \Rightarrow Y)=\frac{\#(X \cup Y)}{\#(X)},
+\]
+\[
+\operatorname{lift}(X \Rightarrow Y)=
+\frac{\operatorname{confidence}(X \Rightarrow Y)}
+{\operatorname{support}(Y)}.
+\]
+其中，支持度表示规则在全部样本中的覆盖比例，置信度表示当前件出现时后件同时出现的条件概率，提升度用于衡量该规则相对于独立分布的增强程度。
+
+FP-growth 是一种无需候选项集生成的频繁模式挖掘算法。与 Apriori 相比，FP-growth 通过构造 FP-tree 压缩事务数据库，并递归挖掘条件模式基，从而减少候选项集枚举开销。当前项目已经将关联规则挖掘统一到 FP-growth 路径，并优先使用 \texttt{third\_party/Datamining/scripts/core/fpgrowth\_core.py} 中的轻量后端；在后端不可用时可回退到 \texttt{mlxtend} 或本地 fallback。
+
+对于飞行遥测数据而言，关联规则挖掘不能直接证明因果关系，但可以揭示字段状态之间的统计共现模式。例如，高度区间与气压区间之间的强关联、电池余量与电池电压之间的同步变化等，都可以作为后续规则优化、异常解释或专家审阅的线索。
+
+\subsection{相关性分析与因果边界}
+
+相关性分析用于衡量数值变量之间的线性同步变化。当前项目计算 Pearson 相关系数，并输出绝对相关性较高的字段对。其作用是补充关联规则挖掘结果，帮助观察不同遥测变量是否存在一致变化趋势。
+
+不过，相关性不应被解释为因果关系。尤其是在飞行遥测数据中，多个变量可能共同受飞行阶段、环境条件、控制指令或传感器耦合影响。因此，在论文写作中应将相关性结果描述为“统计关系”或“同步变化线索”，而不是直接描述为“导致”或“决定”。
+
+\subsection{证据链与可追溯分析}
+
+证据链是当前项目的重要设计。系统为每个输入文件、Agent 步骤、工具调用和报告生成记录结构化节点。每个节点包含节点编号、父节点、节点类型、工具名称、输入哈希、输出哈希、参数、摘要、时间戳和模型响应编号等信息。该机制的主要价值在于：
+\begin{itemize}
+  \item 支持对分析过程进行事后审计；
+  \item 将最终报告与具体输入文件和工具结果绑定；
+  \item 降低自动化报告生成中的不可复核风险；
+  \item 为后续可信 AI 或工程验收章节提供论证材料。
+\end{itemize}
+
+从学术表述上看，证据链可以被归入“可追溯性”“可复核性”与“可信自动化分析”的范畴。
+
+\section{当前项目阶段性工作记录}
+
+\subsection{已形成的工程结构}
+
+当前项目已经形成较清晰的 MVP 工程结构。核心目录 \texttt{agent\_mvp/} 中包含 Agent 编排、工具实现、数据解析、运行上下文、证据链、报告生成和可视化生成等模块。项目根目录中的 \texttt{README.md} 说明了系统能力、运行方式、数据选择和关联规则后端；\texttt{docs/MVP验收说明.md} 则对项目目标、验收范围、当前限制和后续优先级进行了整理。
+
+\begin{longtable}{p{0.24\textwidth}p{0.68\textwidth}}
+\toprule
+\textbf{模块或材料} & \textbf{当前作用} \\
+\midrule
+\endhead
+\path|agent_mvp/agent.py| & 定义 AgentRunner，负责模型工具调用流程与本地确定性演示流程。 \\
+\path|agent_mvp/tools.py| & 定义本地工具箱，包括数据画像、规则解析、规则命中、关联规则挖掘、相关性分析、校验与报告生成。 \\
+\path|agent_mvp/models.py| & 定义 StoredFile、RuleCard、EvidenceNode 等共享数据结构。 \\
+\path|third_party/Datamining/| & 提供轻量 FP-growth-only 后端，用于关联规则挖掘。 \\
+\path|dataset/last_avg/| & 当前 MVP 主要使用的窗口均值遥测数据。 \\
+\path|examples/rules.md| & 内置 Demo 使用的规则库样例。 \\
+\path|runtime/*/artifacts/report.md| & 已生成的 Demo 分析报告，可作为后续论文实验与系统输出样例。 \\
+\bottomrule
+\end{longtable}
+
+\subsection{已验证的 MVP 闭环}
+
+当前 MVP 已经能够完成如下闭环：
+\begin{enumerate}
+  \item 用户输入目标、规则库和数据集；
+  \item Agent 生成分析计划；
+  \item 本地工具箱依次执行数据画像、规则解析、缺失值检查、离群值提示、规则命中、FP-growth 关联规则挖掘、相关性分析与可视化生成；
+  \item 系统执行结果校验；
+  \item 生成中文 Markdown/HTML 报告与可视化看板；
+  \item 将输入、工具调用、输出与报告写入 \texttt{evidence\_chain.json}。
+\end{enumerate}
+
+已有运行报告显示，内置 Demo 可以处理 20472 行、50 列的飞行遥测数据，并解析 7 条规则。报告中包含规则命中摘要、关联规则挖掘结果、相关性摘要、工具调用摘要、Agent 总结、分析局限和 MVP 验收检查项。这说明当前系统已经具备论文原型实验所需的基本可展示性。
+
+\subsection{当前阶段的研究价值}
+
+当前阶段的价值不在于构建一个完整生产级智能决策系统，而在于证明以下方法链条是可运行且可审阅的：
+\begin{quote}
+规则库与遥测数据输入 $\rightarrow$ Agent 工具计划 $\rightarrow$ 本地可信执行 $\rightarrow$ 结构化结果校验 $\rightarrow$ 报告生成 $\rightarrow$ 证据链追溯。
+\end{quote}
+
+该链条可以支撑论文中关于“方法可行性”的论证。尤其是对于航空数据分析场景，系统不能仅追求自动生成结论，还必须强调结论来源、工具参数、数据版本和报告生成过程的可复核性。
+
+\subsection{当前限制与论文表述边界}
+
+当前项目仍处于 MVP 阶段，论文写作时需要明确以下限制：
+\begin{itemize}
+  \item 当前内置 Demo 主要处理 \texttt{last\_avg} 均值特征，尚未完成多类型数据自动适配。
+  \item 当前样例数据中 \texttt{label} 字段全部为 0，\texttt{diagnosis} 字段为空，因此不能进行监督分类准确率或故障类型识别评估。
+  \item 当前规则解析以简单比较表达式为主，复杂自然语言规则仍需结构化。
+  \item 当前关联规则挖掘揭示的是字段状态共现，不应解释为因果机制。
+  \item 当前离群值检查只是数据质量提示，不等同于独立异常检测模型。
+  \item 当前 Web 前端是 MVP 演示界面，尚不是完整产品化交互系统。
+\end{itemize}
+
+这些限制并非负面材料，而是后续论文中“系统边界”“实验限制”和“未来工作”的重要内容。
+
+\section{可用于后续论文的初步写作素材}
+
+\subsection{可能的论文题目}
+
+结合当前项目内容，后续论文题目可考虑如下方向：
+\begin{itemize}
+  \item 面向飞行遥测数据的规则驱动 Agent 工具编排方法研究；
+  \item 基于规则库与 FP-growth 的飞行遥测数据可追溯分析系统设计；
+  \item 面向航空数据分析的 Agent 工具调用与证据链报告生成方法；
+  \item 融合专家规则与关联规则挖掘的飞行遥测数据分析原型系统。
+\end{itemize}
+
+\subsection{可写入绪论的研究问题}
+
+后续论文可以围绕以下研究问题展开：
+\begin{enumerate}
+  \item 如何在飞行遥测数据分析中融合专家规则与数据驱动的关联模式发现？
+  \item 如何设计一种 Agent 编排机制，使其既能利用大语言模型的计划能力，又能避免模型直接处理原始数据带来的不可控风险？
+  \item 如何通过本地工具执行和证据链记录，提高自动化数据分析报告的可复核性？
+  \item 如何在 MVP 阶段验证规则库解析、规则命中、关联规则挖掘和报告生成的工程可行性？
+\end{enumerate}
+
+\subsection{可写入方法章节的核心表述}
+
+本文方法可概括为：首先对输入遥测数据进行画像，获得字段结构、缺失情况与统计分布；其次将规则库解析为统一 RuleCard 表示，并对可执行规则进行条件匹配；随后将数值字段离散化或分箱后构造事务集合，采用 FP-growth 算法挖掘频繁项集与关联规则；再通过相关性分析补充变量间线性同步关系；最后由 Agent 汇总本地工具结果，经校验后生成报告，并将全过程写入证据链。
+
+\section{后续工作记录生成规范}
+
+为便于后续论文写作，建议在当前目录 \texttt{paper\_work\_records/} 中持续生成阶段性 LaTeX 文件。后续当用户提示“生成当前阶段工作记录”时，可按以下约定执行：
+\begin{itemize}
+  \item 文件命名格式：\texttt{stage\_XXX\_主题\_日期.tex}；
+  \item 文风保持学术化，避免口语化流水账；
+  \item 每份记录包括阶段背景、已完成工作、关键技术点、实验或运行结果、问题与下一步计划；
+  \item 若涉及代码变更，应说明变更对应的模块、研究意义与论文可写作角度；
+  \item 若涉及实验结果，应区分“观测结果”“解释性判断”和“尚不能得出的结论”。
+\end{itemize}
+
+\section{本阶段小结}
+
+当前项目已经具备一个较完整的 Agent 工具编排 MVP：它能够围绕飞行遥测数据完成规则库解析、数据质量检查、规则命中、FP-growth 关联规则挖掘、相关性分析、报告生成与证据链记录。第一次阶段记录的重点在于为论文写作建立基础概念框架，并明确当前系统的研究主题、工程边界和后续可展开的问题。后续阶段应重点补充规则库结构化方法、字段语义映射、实验指标设计、多数据集验证与证据链可信性分析。
+
+\begin{thebibliography}{9}
+\bibitem{agrawal1993}
+Agrawal, R., Imielinski, T., and Swami, A. Mining association rules between sets of items in large databases. \textit{Proceedings of the 1993 ACM SIGMOD International Conference on Management of Data}, 1993.
+
+\bibitem{han2000}
+Han, J., Pei, J., and Yin, Y. Mining frequent patterns without candidate generation. \textit{Proceedings of the 2000 ACM SIGMOD International Conference on Management of Data}, 2000.
+
+\bibitem{russell2020}
+Russell, S., and Norvig, P. \textit{Artificial Intelligence: A Modern Approach}. 4th edition. Pearson, 2020.
+
+\bibitem{wooldridge2009}
+Wooldridge, M. \textit{An Introduction to MultiAgent Systems}. 2nd edition. Wiley, 2009.
+
+\bibitem{pearl2009}
+Pearl, J. \textit{Causality: Models, Reasoning, and Inference}. 2nd edition. Cambridge University Press, 2009.
+\end{thebibliography}
+
+\end{document}
