@@ -1,0 +1,97 @@
+schema_id: telemetry_last_avg_v1
+dataset_kind: last_avg
+language: zh-CN
+status: draft_for_review
+description: 当前内置 Demo 使用的 last_avg 遥测字段语义配置。字段中文名用于报告展示，数据分析仍以原始字段名为准。
+
+ignored_fields:
+  - 00000_Time_epoch
+  - 00000_Span_Time_epoch
+  - 00000_Time_boot_sec
+  - 00000_Span_Time_boot_sec
+  - label
+  - diagnosis
+
+analysis_columns:
+  - 1_battery_remaining_avg
+  - 1_current_battery_avg
+  - 1_voltage_battery_avg
+  - 147_battery_remaining_avg
+  - 147_current_battery_avg
+  - 147_current_consumed_avg
+  - 168_speed_avg
+  - 182_altitude_avg
+  - 241_vibration_x_avg
+  - 241_vibration_y_avg
+  - 241_vibration_z_avg
+  - 29_press_abs_avg
+  - 29_press_diff_avg
+  - 29_temperature_avg
+  - 33_alt_avg
+  - 33_relative_alt_avg
+  - 33_vx_avg
+  - 33_vy_avg
+  - 33_vz_avg
+
+field_groups:
+  time: 时间元数据
+  power: 电源与电池
+  navigation: 导航与速度
+  attitude: 姿态角
+  imu: IMU 传感器
+  vibration: 振动
+  barometer: 气压与温度
+  label: 标注字段
+  other: 其他
+
+fields:
+  00000_Time_epoch: {display_name: 时间戳, group: time, role: metadata, ignore: true}
+  00000_Span_Time_epoch: {display_name: 时间戳跨度, group: time, role: metadata, ignore: true}
+  00000_Time_boot_sec: {display_name: 启动后时间, group: time, role: metadata, ignore: true}
+  00000_Span_Time_boot_sec: {display_name: 启动后时间跨度, group: time, role: metadata, ignore: true}
+  1_battery_remaining_avg: {display_name: 主电池剩余电量均值, group: power, role: feature}
+  1_current_battery_avg: {display_name: 主电池电流均值, group: power, role: feature}
+  1_voltage_battery_avg: {display_name: 主电池电压均值, group: power, role: feature}
+  125_Vcc_avg: {display_name: 125 模块供电电压均值, group: power, role: feature}
+  147_battery_remaining_avg: {display_name: 备用电池剩余电量均值, group: power, role: feature}
+  147_current_battery_avg: {display_name: 备用电池电流均值, group: power, role: feature}
+  147_current_consumed_avg: {display_name: 备用电池累计耗电均值, group: power, role: feature}
+  165_Vcc_avg: {display_name: 165 模块供电电压均值, group: power, role: feature}
+  168_direction_avg: {display_name: 航向方向均值, group: navigation, role: feature}
+  168_speed_avg: {display_name: 地速均值, group: navigation, role: feature}
+  178_pitch_avg: {display_name: 178 俯仰角均值, group: attitude, role: feature}
+  178_roll_avg: {display_name: 178 横滚角均值, group: attitude, role: feature}
+  178_yaw_avg: {display_name: 178 偏航角均值, group: attitude, role: feature}
+  182_altitude_avg: {display_name: 高度均值, group: navigation, role: feature}
+  182_pitch_avg: {display_name: 182 俯仰角均值, group: attitude, role: feature}
+  182_roll_avg: {display_name: 182 横滚角均值, group: attitude, role: feature}
+  182_yaw_avg: {display_name: 182 偏航角均值, group: attitude, role: feature}
+  241_vibration_x_avg: {display_name: X 轴振动均值, group: vibration, role: feature}
+  241_vibration_y_avg: {display_name: Y 轴振动均值, group: vibration, role: feature}
+  241_vibration_z_avg: {display_name: Z 轴振动均值, group: vibration, role: feature}
+  27_xacc_avg: {display_name: X 轴加速度均值, group: imu, role: feature}
+  27_xgyro_avg: {display_name: X 轴角速度均值, group: imu, role: feature}
+  27_xmag_avg: {display_name: X 轴磁场均值, group: imu, role: feature}
+  27_yacc_avg: {display_name: Y 轴加速度均值, group: imu, role: feature}
+  27_ygyro_avg: {display_name: Y 轴角速度均值, group: imu, role: feature}
+  27_ymag_avg: {display_name: Y 轴磁场均值, group: imu, role: feature}
+  27_zacc_avg: {display_name: Z 轴加速度均值, group: imu, role: feature}
+  27_zgyro_avg: {display_name: Z 轴角速度均值, group: imu, role: feature}
+  27_zmag_avg: {display_name: Z 轴磁场均值, group: imu, role: feature}
+  29_press_abs_avg: {display_name: 绝对气压均值, group: barometer, role: feature}
+  29_press_diff_avg: {display_name: 气压差均值, group: barometer, role: feature}
+  29_temperature_avg: {display_name: 气压计温度均值, group: barometer, role: feature}
+  30_pitch_avg: {display_name: 30 俯仰角均值, group: attitude, role: feature}
+  30_pitchspeed_avg: {display_name: 俯仰角速度均值, group: attitude, role: feature}
+  30_roll_avg: {display_name: 30 横滚角均值, group: attitude, role: feature}
+  30_rollspeed_avg: {display_name: 横滚角速度均值, group: attitude, role: feature}
+  30_yaw_avg: {display_name: 30 偏航角均值, group: attitude, role: feature}
+  30_yawspeed_avg: {display_name: 偏航角速度均值, group: attitude, role: feature}
+  33_alt_avg: {display_name: GPS 高度均值, group: navigation, role: feature}
+  33_hdg_avg: {display_name: 航向角均值, group: navigation, role: feature}
+  33_relative_alt_avg: {display_name: 相对高度均值, group: navigation, role: feature}
+  33_vx_avg: {display_name: X 向速度均值, group: navigation, role: feature}
+  33_vy_avg: {display_name: Y 向速度均值, group: navigation, role: feature}
+  33_vz_avg: {display_name: Z 向垂直速度均值, group: navigation, role: feature}
+  label: {display_name: 标签, group: label, role: target, ignore: true}
+  diagnosis: {display_name: 诊断说明, group: label, role: target, ignore: true}

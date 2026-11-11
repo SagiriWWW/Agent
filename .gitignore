@@ -1,0 +1,35 @@
+.venv/
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Temporary brainstorm machine state; preserve authored content and plans.
+/.superpowers/brainstorm/.last-*
+/.superpowers/brainstorm/*/state/
+
+# Local secrets and private key/certificate material.
+/.env
+/.env.*
+!/.env.example
+!/.env.*.example
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+
+# Known LaTeX build directories; keep sources and verification logs trackable.
+/latex_project/**/build/
+
+# Runtime execution artifacts (per-run outputs). Legacy path kept for older runs.
+/outputs/
+/runtime/
+
+# Local packaging products
+build/
+dist/
+*.egg-info/

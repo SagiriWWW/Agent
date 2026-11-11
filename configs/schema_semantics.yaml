@@ -1,0 +1,110 @@
+schema_id: telemetry_semantic_roles_v1
+language: zh-CN
+status: draft_for_review
+description: >
+  面向跨客户数据集的字段语义角色配置。这里描述“主电池余量、主电池电压、
+  Z 轴振动”等可复用业务语义，不把当前 last_avg 样例字段当作唯一结构。
+
+semantic_roles:
+  main_battery_remaining:
+    display_name: 主电池剩余电量
+    group: power
+    unit: percent
+    source_codes: ["1"]
+    tokens: [main, primary, battery, remaining, level, charge, capacity]
+    aliases:
+      - 1_battery_remaining
+      - 1_battery_remaining_avg
+      - 1_battery_remaining_last
+      - main_battery_remaining
+      - main_battery_level
+      - battery_pct
+      - battery_percent
+      - battery_remaining_percent
+
+  main_battery_voltage:
+    display_name: 主电池电压
+    group: power
+    unit: volt
+    source_codes: ["1"]
+    tokens: [main, primary, battery, voltage, volt]
+    aliases:
+      - 1_voltage_battery
+      - 1_voltage_battery_avg
+      - 1_voltage_battery_last
+      - main_battery_voltage
+      - battery_voltage
+      - battery_voltage_mv
+      - voltage_battery
+
+  main_battery_current:
+    display_name: 主电池电流
+    group: power
+    unit: ampere
+    source_codes: ["1"]
+    tokens: [main, primary, battery, current, ampere, amp]
+    aliases:
+      - 1_current_battery
+      - 1_current_battery_avg
+      - 1_current_battery_last
+      - main_battery_current
+      - battery_current
+      - battery_current_amp
+      - current_battery
+
+  vibration_z:
+    display_name: Z 轴振动
+    group: vibration
+    unit: raw_vibration
+    source_codes: ["241"]
+    tokens: [vibration, vib, z, zaxis, axisz]
+    aliases:
+      - 241_vibration_z
+      - 241_vibration_z_avg
+      - 241_vibration_z_last
+      - vibration_z
+      - z_vibration
+      - vib_z
+
+  barometer_temperature:
+    display_name: 气压计温度
+    group: barometer
+    unit: celsius
+    source_codes: ["29"]
+    tokens: [barometer, baro, temperature, temp]
+    aliases:
+      - 29_temperature
+      - 29_temperature_avg
+      - 29_temperature_last
+      - barometer_temperature
+      - baro_temp
+      - temperature
+
+  vertical_speed:
+    display_name: Z 向垂直速度
+    group: navigation
+    unit: m/s
+    source_codes: ["33"]
+    tokens: [vertical, speed, velocity, vz, z]
+    aliases:
+      - 33_vz
+      - 33_vz_avg
+      - 33_vz_last
+      - vertical_speed
+      - climb_rate
+      - descent_rate
+      - vz
+
+  ground_speed:
+    display_name: 地速
+    group: navigation
+    unit: m/s
+    source_codes: ["168"]
+    tokens: [ground, speed, velocity]
+    aliases:
+      - 168_speed
+      - 168_speed_avg
+      - 168_speed_last
+      - ground_speed
+      - groundspeed
+      - speed

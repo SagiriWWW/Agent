@@ -1,0 +1,35 @@
+schema_id: schema_mapping_overrides_v1
+language: zh-CN
+status: draft_for_review
+description: >
+  人工确认后的 Schema 映射回写配置。这里不用于针对某一个样例数据集调参，
+  而是沉淀“字段语义已经确认”或“规则字段到客户字段的映射已经确认”的事实。
+  默认 active 配置为空，避免未复核的候选被误当作正式映射。
+
+# active: 客户字段语义确认。key 是客户数据字段名，value 是确认后的稳定语义角色和口径。
+confirmed_mappings: {}
+
+# active: 规则字段到客户字段的直接确认。key 是规则字段名，dataset_field 是客户数据字段名。
+confirmed_rule_mappings: {}
+
+# examples 只作为填写参考，不会被工具读取为 active 配置。
+examples:
+  confirmed_mappings:
+    battery_pct:
+      semantic_role: main_battery_remaining
+      display_name: 主电池剩余电量
+      group: power
+      unit: percent
+      statistic: raw
+      confirmed_by: domain_expert
+      confirmed_at: "2026-07-03"
+      note: battery_pct 已确认表示主电池剩余电量百分比。
+  confirmed_rule_mappings:
+    1_battery_remaining_avg:
+      dataset_field: battery_pct
+      semantic_role: main_battery_remaining
+      unit: percent
+      statistic: raw
+      confirmed_by: domain_expert
+      confirmed_at: "2026-07-03"
+      note: 该映射只确认字段语义，不自动确认阈值和统计窗口完全等价。
